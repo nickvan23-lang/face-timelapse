@@ -601,12 +601,13 @@ def _natural_sort_key(s: str) -> List:
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", s)]
 
 
-def discover_images(input_dir: str) -> List[str]:
+def discover_images(input_dir: str, recursive: bool = False) -> List[str]:
     """
     Scan ``input_dir`` for supported images and return a naturally sorted list.
 
     Args:
         input_dir: Path to the directory containing source images.
+        recursive: If True, walk all subfolders via rglob.
 
     Returns:
         Sorted list of absolute image path strings.
@@ -618,16 +619,15 @@ def discover_images(input_dir: str) -> List[str]:
     if not p.is_dir():
         raise ValueError(f"Input directory does not exist: {p}")
 
-    paths = [str(f) for f in p.iterdir() if f.suffix.lower() in SUPPORTED_EXT]
+    glob = p.rglob("*") if recursive else p.iterdir()
+    paths = [str(f) for f in glob if f.is_file() and f.suffix.lower() in SUPPORTED_EXT]
 
     if not paths:
-        raise ValueError(
-            f"No supported images found in '{p}'. "
-            f"Supported extensions: {sorted(SUPPORTED_EXT)}"
-        )
+        suffix = " (including subfolders)" if recursive else f". Supported extensions: {sorted(SUPPORTED_EXT)}"
+        raise ValueError(f"No supported images found in '{p}'{suffix}")
 
     paths.sort(key=_natural_sort_key)
-    log.info("Found %d images in %s", len(paths), p)
+    log.info("Found %d images in %s (recursive=%s)", len(paths), p, recursive)
     return paths
 
 
