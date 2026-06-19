@@ -295,6 +295,11 @@ def detect_all_faces(
         if pbar:
             pbar.close()
 
+    # Fill any indices that were never collected (cancel mid-batch)
+    for i in range(len(tasks)):
+        if i not in bucket:
+            bucket[i] = DetectionResult(path=tasks[i][0], index=i, error="Cancelled")
+
     return [bucket[i] for i in range(len(image_paths))]
 
 

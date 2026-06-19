@@ -32,7 +32,7 @@ app = Flask(__name__)
 # Global job state — only one job at a time
 # ---------------------------------------------------------------------------
 
-_progress_q: queue.Queue = queue.Queue()
+_progress_q: queue.Queue = queue.Queue(maxsize=512)
 _cancel_event = threading.Event()
 _job_lock = threading.Lock()
 _job_active: bool = False
@@ -273,6 +273,10 @@ def run() -> Response:
     if len(parts) != 2 or not all(p.strip().isdigit() for p in parts):
         return jsonify({"error": f"Invalid resolution '{resolution}'. Use WxH, e.g. 1920x1080."}), 400
 
+    fps_val = float(data.get("fps", 24))
+    if fps_val <= 0:
+        return jsonify({"error": "fps must be greater than 0."}), 400
+
     with _job_lock:
         if _job_active:
             return jsonify({"error": "A job is already running."}), 409
@@ -285,7 +289,15 @@ def run() -> Response:
             _progress_q.get_nowait()
         except queue.Empty:
             break
-    _output_file = data.get("output_file", "timelapse_output.mp4")
+    raw_output = data.get("output_file", "timelapse_output.mp4") or "timelapse_output.mp4"
+    resolved_output = Path(raw_output).resolve()
+    allowed_root = Path.cwd().resolve()
+    if not str(resolved_output).startswith(str(allowed_root)):
+        with _job_lock:
+            _job_active = False
+        return jsonify({"error": "output_file must be within the current working directory."}), 400
+    _output_file = str(resolved_output)
+    data["output_file"] = _output_file
 
     t = threading.Thread(target=_run_pipeline, args=(data,), daemon=True)
     t.start()
@@ -300,12 +312,17 @@ def progress() -> Response:
         while True:
             try:
                 event = _progress_q.get(timeout=30)
-                yield f"data: {json.dumps(event)}\n\n"
+                try:
+                    yield f"data: {json.dumps(event)}\n\n"
+                except GeneratorExit:
+                    return
                 if event.get("phase") in ("done", "error"):
                     break
             except queue.Empty:
-                # keepalive ping so the browser connection stays open
-                yield 'data: {"phase":"ping"}\n\n'
+                try:
+                    yield 'data: {"phase":"ping"}\n\n'
+                except GeneratorExit:
+                    return
 
     return Response(
         stream_with_context(generate()),
