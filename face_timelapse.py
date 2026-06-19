@@ -23,7 +23,8 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
+import threading
 
 import cv2
 import mediapipe as mp
@@ -238,6 +239,8 @@ def detect_all_faces(
     image_paths: List[str],
     num_workers: int,
     batch_size: int = 128,
+    progress_callback: Optional[Callable[[str, int, int], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> List[DetectionResult]:
     """
     Run face detection across every image using a process pool.
@@ -258,9 +261,18 @@ def detect_all_faces(
 
     log.info("Pass 1 — face detection  (%d workers, %d images)", num_workers, len(tasks))
 
-    with ProcessPoolExecutor(max_workers=num_workers, initializer=_worker_init) as pool:
-        with tqdm(total=len(tasks), desc="Detecting faces", unit="img", dynamic_ncols=True) as pbar:
+    use_tqdm = progress_callback is None
+    pbar = (
+        tqdm(total=len(tasks), desc="Detecting faces", unit="img", dynamic_ncols=True)
+        if use_tqdm
+        else None
+    )
+
+    try:
+        with ProcessPoolExecutor(max_workers=num_workers, initializer=_worker_init) as pool:
             for start in range(0, len(tasks), batch_size):
+                if cancel_event and cancel_event.is_set():
+                    break
                 batch = tasks[start : start + batch_size]
                 futures = {pool.submit(_worker_detect, t): t for t in batch}
 
@@ -275,7 +287,13 @@ def detect_all_faces(
                             error=str(exc),
                         )
                     bucket[res.index] = res
-                    pbar.update(1)
+                    if use_tqdm:
+                        pbar.update(1)  # type: ignore[union-attr]
+                    else:
+                        progress_callback("detection", len(bucket), len(tasks))  # type: ignore[misc]
+    finally:
+        if pbar:
+            pbar.close()
 
     return [bucket[i] for i in range(len(image_paths))]
 
@@ -477,6 +495,8 @@ def write_video(
     zoom: float,
     eye_span_fraction: float,
     blur_bg: bool,
+    progress_callback: Optional[Callable[[str, int, int], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> None:
     """
     Read images one-by-one (streaming), apply the affine warp, write frames.
@@ -510,18 +530,25 @@ def write_video(
 
     try:
         log.info("Pass 2 — writing video → %s", output_file)
-        with tqdm(
-            total=len(image_paths),
-            desc="Writing frames",
-            unit="frame",
-            dynamic_ncols=True,
-        ) as pbar:
+        use_tqdm = progress_callback is None
+        total_frames = len(image_paths)
+        pbar = (
+            tqdm(total=total_frames, desc="Writing frames", unit="frame", dynamic_ncols=True)
+            if use_tqdm
+            else None
+        )
+        try:
             for path, eyes in zip(image_paths, smoothed):
-                pbar.update(1)
+                if cancel_event and cancel_event.is_set():
+                    break
+                if use_tqdm:
+                    pbar.update(1)  # type: ignore[union-attr]
 
                 if eyes is None:
                     # Before first detection — no valid reference state yet
                     skipped += 1
+                    if not use_tqdm:
+                        progress_callback("writing", written + skipped, total_frames)  # type: ignore[misc]
                     continue
 
                 try:
@@ -529,6 +556,8 @@ def write_video(
                     if img is None:
                         log.debug("Skipping unreadable image: %s", path)
                         skipped += 1
+                        if not use_tqdm:
+                            progress_callback("writing", written + skipped, total_frames)  # type: ignore[misc]
                         continue
 
                     h, w = img.shape[:2]
@@ -536,10 +565,17 @@ def write_video(
                     frame = apply_warp(img, M, dst_w, dst_h, blur_bg)
                     writer.write(frame)
                     written += 1
+                    if not use_tqdm:
+                        progress_callback("writing", written + skipped, total_frames)  # type: ignore[misc]
 
                 except Exception as exc:  # noqa: BLE001
                     log.debug("Error processing %s: %s", path, exc)
                     skipped += 1
+                    if not use_tqdm:
+                        progress_callback("writing", written + skipped, total_frames)  # type: ignore[misc]
+        finally:
+            if pbar:
+                pbar.close()
     finally:
         writer.release()
 
