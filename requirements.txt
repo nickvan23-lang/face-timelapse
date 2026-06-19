@@ -1,0 +1,5 @@
+# face_timelapse.py — Python >= 3.10 required
+opencv-python>=4.9.0
+mediapipe>=0.10.14
+numpy>=1.26.0
+tqdm>=4.66.0
