@@ -80,6 +80,19 @@ input:focus{border-color:#6366f1}
 #video-section{display:none}
 video{width:100%;border-radius:8px;background:#000;margin-top:.75rem}
 .ok-lbl{font-size:.875rem;color:#4ade80;margin-bottom:.25rem}
+.drop-zone{border:2px dashed #2d3148;border-radius:10px;padding:1.75rem 1.5rem;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:#0f1117;user-select:none}
+.drop-zone.dz-hover{border-color:#6366f1;background:#6366f112}
+.dz-icon{font-size:2rem;margin-bottom:.4rem}
+.dz-text{font-size:.95rem;font-weight:600;color:#e2e8f0}
+.dz-sub{font-size:.78rem;color:#64748b;margin-top:.2rem}
+.dz-picked{display:none;align-items:center;gap:.5rem;justify-content:center;font-size:.95rem;color:#e2e8f0}
+.dz-badge{background:#1e293b;border-radius:999px;padding:.15rem .55rem;font-size:.72rem;color:#94a3b8}
+.scan-row{display:flex;align-items:center;justify-content:space-between;margin-top:.45rem;min-height:1.75rem}
+.btn-scan{background:#374151;color:#e2e8f0;border:none;border-radius:6px;padding:.38rem .85rem;font-size:.8rem;font-weight:500;cursor:pointer;transition:background .15s}
+.btn-scan:hover{background:#4b5563}
+.btn-scan:disabled{opacity:.45;cursor:not-allowed}
+.scan-ok{color:#4ade80;font-size:.8rem}
+.scan-err{color:#ef4444;font-size:.8rem}
 </style>
 </head>
 <body>
@@ -89,7 +102,30 @@ video{width:100%;border-radius:8px;background:#000;margin-top:.75rem}
   <div class="card">
     <div class="field">
       <label class="lbl">Input Folder</label>
-      <input type="text" id="input_dir" placeholder="/path/to/photos">
+      <div class="drop-zone" id="drop-zone"
+           onclick="dzClick(event)"
+           ondragover="dzOver(event)"
+           ondragleave="dzLeave(event)"
+           ondrop="dzDrop(event)">
+        <input type="file" id="folder-input" webkitdirectory multiple
+               style="display:none" onchange="dzPicked(this)">
+        <div id="dz-idle">
+          <div class="dz-icon">&#128193;</div>
+          <div class="dz-text">Drag a folder here</div>
+          <div class="dz-sub">or click to browse</div>
+        </div>
+        <div class="dz-picked" id="dz-picked">
+          <span>&#128193;</span>
+          <span id="dz-name"></span>
+          <span class="dz-badge" id="dz-client-count"></span>
+        </div>
+      </div>
+      <input type="text" id="input_dir" placeholder="/full/path/to/folder"
+             style="margin-top:.5rem" oninput="dzResetScan()">
+      <div class="scan-row">
+        <div id="scan-status"></div>
+        <button class="btn-scan" id="btn-scan" onclick="scanFolder()">Scan Folder</button>
+      </div>
     </div>
     <div class="field">
       <label class="lbl">Output File</label>
@@ -129,7 +165,7 @@ video{width:100%;border-radius:8px;background:#000;margin-top:.75rem}
       </div>
     </div>
     <div class="btn-row">
-      <button class="btn-primary" id="btn-gen" onclick="startJob()">&#9654; Generate Timelapse</button>
+      <button class="btn-primary" id="btn-gen" onclick="startJob()" disabled>&#9654; Generate Timelapse</button>
       <button class="btn-cancel" id="btn-cancel" style="display:none" onclick="cancelJob()">&#10005; Cancel</button>
     </div>
   </div>
@@ -151,11 +187,77 @@ video{width:100%;border-radius:8px;background:#000;margin-top:.75rem}
 </div>
 <script>
 let es = null;
+let _scanned = false;
+const _IMG_EXT = new Set(['.jpg','.jpeg','.png','.bmp','.tiff','.tif','.webp']);
+
+function dzClick(e) {
+  if (e.target.id === 'input_dir') return;
+  document.getElementById('folder-input').click();
+}
+function dzOver(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.add('dz-hover');
+}
+function dzLeave(e) {
+  document.getElementById('drop-zone').classList.remove('dz-hover');
+}
+function dzDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('dz-hover');
+  document.getElementById('folder-input').click();
+}
+function dzPicked(input) {
+  const files = Array.from(input.files);
+  if (!files.length) return;
+  const folderName = files[0].webkitRelativePath.split('/')[0];
+  const imgCount = files.filter(f => _IMG_EXT.has('.' + f.name.split('.').pop().toLowerCase())).length;
+  document.getElementById('dz-idle').style.display = 'none';
+  const picked = document.getElementById('dz-picked');
+  picked.style.display = 'flex';
+  document.getElementById('dz-name').textContent = folderName;
+  document.getElementById('dz-client-count').textContent = imgCount.toLocaleString() + ' images';
+  dzResetScan();
+}
+function dzResetScan() {
+  _scanned = false;
+  document.getElementById('scan-status').innerHTML = '';
+  document.getElementById('btn-gen').disabled = true;
+}
+async function scanFolder() {
+  const path = document.getElementById('input_dir').value.trim();
+  if (!path) { alert('Enter the full path to the folder first.'); return; }
+  const btn = document.getElementById('btn-scan');
+  btn.disabled = true;
+  document.getElementById('scan-status').innerHTML = '<span style="color:#94a3b8">Scanning…</span>';
+  try {
+    const r = await fetch('/scan', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({path, recursive: true}),
+    });
+    const d = await r.json();
+    if (d.error) {
+      document.getElementById('scan-status').innerHTML = `<span class="scan-err">${d.error}</span>`;
+      document.getElementById('btn-gen').disabled = true;
+      _scanned = false;
+    } else {
+      document.getElementById('scan-status').innerHTML =
+        `<span class="scan-ok">&#10003; ${d.count.toLocaleString()} photos found</span>`;
+      document.getElementById('btn-gen').disabled = false;
+      _scanned = true;
+    }
+  } catch(e) {
+    document.getElementById('scan-status').innerHTML = `<span class="scan-err">${e}</span>`;
+    document.getElementById('btn-gen').disabled = true;
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 function startJob() {
   const inputDir = document.getElementById('input_dir').value.trim();
   const outputFile = document.getElementById('output_file').value.trim();
-  if (!inputDir) { alert('Please enter an input folder path.'); return; }
+  if (!inputDir) { alert('Please enter the full path to the folder and click Scan Folder first.'); return; }
 
   const payload = {
     input_dir: inputDir,
@@ -166,6 +268,7 @@ function startJob() {
     ema_alpha: parseFloat(document.getElementById('ema_alpha').value),
     eye_span: parseFloat(document.getElementById('eye_span').value),
     blur_bg: document.querySelector('input[name=blur_bg]:checked').value === 'true',
+    recursive: true,
   };
 
   resetUI();
@@ -240,7 +343,7 @@ function resetUI() {
 }
 
 function resetButtons() {
-  document.getElementById('btn-gen').disabled = false;
+  document.getElementById('btn-gen').disabled = !_scanned;
   document.getElementById('btn-cancel').style.display = 'none';
 }
 </script>
