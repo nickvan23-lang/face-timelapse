@@ -339,6 +339,24 @@ def video() -> Response:
     return send_file(_output_file, mimetype="video/mp4")
 
 
+@app.post("/scan")
+def scan() -> Response:
+    """Validate path and count images, optionally recursing subfolders."""
+    data: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+
+    raw_path = data.get("path", "").strip()
+    if not raw_path:
+        return jsonify({"error": "path is required."}), 400
+
+    recursive = bool(data.get("recursive", True))
+
+    try:
+        paths = discover_images(raw_path, recursive=recursive)
+        return jsonify({"count": len(paths), "path": str(Path(raw_path).resolve())})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.post("/cancel")
 def cancel() -> Response:
     """Signal the running job to stop."""
@@ -358,7 +376,10 @@ def _run_pipeline(data: Dict[str, Any]) -> None:
         w, h = [int(x) for x in data["resolution"].lower().split("x")]
         num_workers = max(1, os.cpu_count() - 1)  # type: ignore[operator]
 
-        image_paths = discover_images(data["input_dir"])
+        image_paths = discover_images(
+            data["input_dir"],
+            recursive=bool(data.get("recursive", True)),
+        )
         total = len(image_paths)
 
         def det_cb(phase: str, current: int, total_count: int) -> None:
