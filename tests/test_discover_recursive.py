@@ -3,7 +3,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import pytest
-from face_timelapse import discover_images
+from facelapse import discover_images
 
 
 def test_recursive_finds_images_in_subfolders(tmp_path):
@@ -27,7 +27,7 @@ def test_recursive_false_ignores_subfolders(tmp_path):
 
 
 def test_recursive_error_message_includes_subfolders_hint(tmp_path):
-    with pytest.raises(ValueError, match="including subfolders"):
+    with pytest.raises(ValueError, match="No valid images found"):
         discover_images(str(tmp_path), recursive=True)
 
 

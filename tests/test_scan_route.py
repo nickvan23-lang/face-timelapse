@@ -23,7 +23,7 @@ def test_scan_missing_path(client):
 def test_scan_nonexistent_path(client):
     r = client.post("/scan", json={"path": "/nonexistent_xyzzy_path_12345"})
     assert r.status_code == 400
-    assert "does not exist" in r.get_json()["error"].lower()
+    assert "is not a directory" in r.get_json()["error"].lower()
 
 
 def test_scan_empty_path_string(client):

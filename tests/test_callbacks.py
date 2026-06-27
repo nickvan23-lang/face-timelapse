@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from face_timelapse import write_video, EyeCoords
+from facelapse import write_video, EyeCoords
 
 
 def test_write_video_calls_progress_callback(tmp_path):
