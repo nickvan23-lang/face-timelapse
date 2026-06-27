@@ -879,7 +879,6 @@ def _run_pipeline(data: Dict[str, Any]) -> None:
             data["input_dir"],
             recursive=bool(data.get("recursive", True)),
         )
-        total = len(image_paths)
 
         def det_cb(phase: str, current: int, total_count: int) -> None:
             _progress_q.put({

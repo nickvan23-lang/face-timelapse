@@ -209,9 +209,9 @@ def _worker_detect(args: Tuple[str, int]) -> DetectionResult:
 
         if len(lms) > _LM_RIGHT_IRIS:
             # 478-point model: use iris centres (most accurate)
-            l = lms[_LM_LEFT_IRIS]
+            l_iris = lms[_LM_LEFT_IRIS]
             r = lms[_LM_RIGHT_IRIS]
-            result.eyes = EyeCoords(lx=l.x, ly=l.y, rx=r.x, ry=r.y)
+            result.eyes = EyeCoords(lx=l_iris.x, ly=l_iris.y, rx=r.x, ry=r.y)
         else:
             # 468-point fallback: average inner+outer eye corners
             li = lms[_LM_LEFT_INNER]
@@ -273,7 +273,7 @@ def detect_all_faces(
             for start in range(0, len(tasks), batch_size):
                 if cancel_event and cancel_event.is_set():
                     break
-                batch = tasks[start : start + batch_size]
+                batch = tasks[start:start + batch_size]
                 futures = {pool.submit(_worker_detect, t): t for t in batch}
 
                 for fut in as_completed(futures):
